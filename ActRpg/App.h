@@ -22,7 +22,11 @@ public:
 
 public:
 	void ChangeScene(GAME_PHASE nextScene);
-
+	
+	GameTime* GetGameTime()
+	{
+		return &m_gameTime;
+	}
 protected:
 	GraphicEngine::GAME_WINDOW m_gameWin
 	{

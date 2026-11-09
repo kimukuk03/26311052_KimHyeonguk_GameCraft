@@ -1,836 +1,628 @@
 #include "ScenePlay.h"
-#include "GameInput.h"
 #include "App.h"
-#include <cmath>
-#include <cstdio>
-#include <algorithm>
-#include <windows.h>
+#include "glc2d.h"
+#include "ScenePlayResult.h"
 
 ScenePlay::ScenePlay()
 {
 	m_message = "Scene Play";
 }
 
-int ScenePlay::Update()
+//플레이 화면 초기화
+int ScenePlay::Init()
 {
-	// =========================
-	// 플레이어 이동
-	// =========================
+	//마린 준비
+	m_player.Init();
+	//HP UI용 작은 폰트 생성
+	m_fontHp = g2_FontCreate("netmarble Medium", 28);
+	//Stage 1부터 시작
+	LoadStage(1);
 
-	// 이동하려는 다음 위치
-	float nextX = m_playerX;
-	float nextY = m_playerY;
+	return 0;
+}
 
+//현재 스테이지에 맞는 몬스터 생성
+void ScenePlay::SpawnStageMobs()
+{
+	m_mobCount = 0;
 
-	// A / D 먼저 계산
-	if (GetGameInput()->GetKeyState('A'))
+	//Stage 1 저글링
+	if (m_currentStage == 1)
 	{
-		nextX -= m_playerSpeed;
-	}
-
-	if (GetGameInput()->GetKeyState('D'))
-	{
-		nextX += m_playerSpeed;
-	}
-
-
-	// X 방향에 벽이 없으면 이동
-	if (!CheckCollision(nextX, m_playerY))
-	{
-		m_playerX = nextX;
-	}
-
-
-	// 다시 현재 위치 기준
-	nextY = m_playerY;
-
-
-	// W / S 계산
-	if (GetGameInput()->GetKeyState('W'))
-	{
-		nextY -= m_playerSpeed;
-	}
-
-	if (GetGameInput()->GetKeyState('S'))
-	{
-		nextY += m_playerSpeed;
-	}
-
-
-	// Y 방향에 벽이 없으면 이동
-	if (!CheckCollision(m_playerX, nextY))
-	{
-		m_playerY = nextY;
-	}
-
-	// =========================
-	// 이동 애니메이션
-	// =========================
-
-	unsigned long long currentTime =
-		GetTickCount64();
-
-
-	if (m_isMoving)
-	{
-		// 약 0.18초마다 프레임 변경
-		if (currentTime - m_lastMoveAnimTime > 180)
+		float positions[12][2] =
 		{
-			m_moveFrame++;
+			{ 650.0f, 220.0f },
+			{ 800.0f, 180.0f },
+			{ 1200.0f, 200.0f },
+			{ 1350.0f, 300.0f },
 
-			if (m_moveFrame >= 2)
-			{
-				m_moveFrame = 0;
-			}
+			{ 700.0f, 380.0f },
+			{ 880.0f, 430.0f },
+			{ 1100.0f, 470.0f },
+			{ 1400.0f, 450.0f },
 
-			m_lastMoveAnimTime = currentTime;
+			{ 700.0f, 600.0f },
+			{ 900.0f, 650.0f },
+			{ 1100.0f, 700.0f },
+			{ 1300.0f, 680.0f }
+		};
+
+		for (int i = 0; i < 12; i++)
+		{
+			m_mobs[i].Init(
+				MobType::ZERGLING
+			);
+
+			m_mobs[i].SetPosition(
+				positions[i][0],
+				positions[i][1]
+			);
 		}
+
+		m_mobCount = 12;
+	}
+
+	//Stage 2 히드라
+	else if (m_currentStage == 2)
+	{
+		float positions[8][2] =
+		{
+			{ 520.0f, 220.0f },
+			{ 760.0f, 180.0f },
+			{ 1050.0f, 220.0f },
+			{ 1320.0f, 260.0f },
+
+			{ 560.0f, 610.0f },
+			{ 820.0f, 650.0f },
+			{ 1080.0f, 620.0f },
+			{ 1340.0f, 580.0f }
+		};
+
+		for (int i = 0; i < 8; i++)
+		{
+			m_mobs[i].Init(
+				MobType::HYDRALISK
+			);
+
+			m_mobs[i].SetPosition(
+				positions[i][0],
+				positions[i][1]
+			);
+		}
+
+		m_mobCount = 8;
+	}
+
+	//Stage 3 울트라 보스
+	else if (m_currentStage == 3)
+	{
+		m_mobs[0].Init(
+			MobType::ULTRALISK
+		);
+
+		m_mobs[0].SetPosition(
+			m_mapWidth * 0.68f,
+			m_mapHeight * 0.50f
+		);
+
+		m_mobCount = 1;
+	}
+}
+
+//스테이지 불러오기
+void ScenePlay::LoadStage(int stage)
+{
+	//기존 몬스터 상태 정리
+	for (int i = 0; i < m_mobCount; i++)
+	{
+		m_mobs[i].Destroy();
+	}
+
+	m_mobCount = 0;
+
+	//기존 맵 해제
+	if (m_txMap != -1)
+	{
+		g2_TextureRelease(
+			m_txMap
+		);
+
+		m_txMap = -1;
+	}
+
+	m_currentStage = stage;
+
+	//Stage 1 맵
+	if (stage == 1)
+	{
+		m_txMap =
+			g2_TextureLoad(
+				"resource/BG/BG_stage1.png"
+			);
+	}
+
+	//Stage 2 맵
+	else if (stage == 2)
+	{
+		m_txMap =
+			g2_TextureLoad(
+				"resource/BG/BG_stage2.png"
+			);
+	}
+
+	//Stage 3 맵
+	else
+	{
+		m_txMap =
+			g2_TextureLoad(
+				"resource/BG/BG_stage3.png"
+			);
+	}
+
+	//현재 맵 실제 크기
+	m_mapWidth =
+		(float)g2_TextureWidth(
+			m_txMap
+		);
+
+	m_mapHeight =
+		(float)g2_TextureHeight(
+			m_txMap
+		);
+
+	//새 스테이지 시작 위치
+	m_player.SetPosition(
+		150.0f,
+		m_mapHeight * 0.5f
+	);
+
+	//카메라 초기화
+	m_cameraX = 0.0f;
+	m_cameraY = 0.0f;
+
+	//충돌박스 초기화
+	m_collisionCount = 0;
+
+	//위쪽 벽
+	m_collisionBoxes[m_collisionCount++] =
+	{
+		0.0f,
+		0.0f,
+		m_mapWidth,
+		80.0f
+	};
+
+	//왼쪽 벽
+	m_collisionBoxes[m_collisionCount++] =
+	{
+		0.0f,
+		0.0f,
+		80.0f,
+		m_mapHeight
+	};
+
+	//아래쪽 벽
+	m_collisionBoxes[m_collisionCount++] =
+	{
+		0.0f,
+		m_mapHeight - 80.0f,
+		m_mapWidth,
+		80.0f
+	};
+
+	//Stage 1과 Stage 2는 오른쪽 출구가 있음
+	if (stage < 3)
+	{
+		float exitCenterY =
+			m_mapHeight * 0.5f;
+
+		float exitHalfHeight =
+			85.0f;
+
+		//오른쪽 위쪽 벽
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			m_mapWidth - 80.0f,
+			0.0f,
+			80.0f,
+			exitCenterY - exitHalfHeight
+		};
+
+		//오른쪽 아래쪽 벽
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			m_mapWidth - 80.0f,
+			exitCenterY + exitHalfHeight,
+			80.0f,
+			m_mapHeight
+		};
 	}
 	else
 	{
-		// 멈춰있으면 첫 번째 프레임
-		m_moveFrame = 0;
+		//Stage 3은 보스맵이라 출구 없음
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			m_mapWidth - 80.0f,
+			0.0f,
+			80.0f,
+			m_mapHeight
+		};
 	}
 
-	// =========================
-	// 마린이 맵 밖으로 못 나가게
-	// =========================
+	//Stage 1 전용 장애물
+	if (stage == 1)
+	{
+		//배럭
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			205.0f,
+			110.0f,
+			300.0f,
+			270.0f
+		};
 
-	if (m_playerX < 0.0f)
-		m_playerX = 0.0f;
+		//바위
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			435.0f,
+			430.0f,
+			105.0f,
+			60.0f
+		};
 
-	if (m_playerY < 0.0f)
-		m_playerY = 0.0f;
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			1035.0f,
+			310.0f,
+			105.0f,
+			55.0f
+		};
 
-	if (m_playerX > m_mapWidth - 30.0f)
-		m_playerX = m_mapWidth - 30.0f;
+		m_collisionBoxes[m_collisionCount++] =
+		{
+			1195.0f,
+			565.0f,
+			125.0f,
+			50.0f
+		};
+	}
 
-	if (m_playerY > m_mapHeight - 30.0f)
-		m_playerY = m_mapHeight - 30.0f;
+	//Stage 2는 현재 내부 장애물 없이 외곽 벽만 사용
 
-	// =========================
-	// 카메라 계산
-	// =========================
+	//현재 스테이지 몬스터 생성
+	SpawnStageMobs();
+}
 
+int ScenePlay::Update()
+{
+	//마린 이동
+	m_player.UpdateMovement(
+		m_collisionBoxes,
+		m_collisionCount,
+		m_mapWidth,
+		m_mapHeight
+	);
+
+	//카메라 이동
+	UpdateCamera();
+
+	//마린 조준과 사격
+	m_player.UpdateCombat(
+		m_cameraX,
+		m_cameraY,
+		m_cameraZoom,
+		m_collisionBoxes,
+		m_collisionCount
+	);
+
+	//프레임 시간
+	float deltaTime =
+		g_pApp->GetGameTime()->GetDeltaTime()
+		/ 1000.0f;
+
+	if (deltaTime > 0.05f)
+	{
+		deltaTime = 0.05f;
+	}
+
+	//모든 몬스터 처리
+	for (int i = 0; i < m_mobCount; i++)
+	{
+		//몬스터 이동과 공격
+		m_mobs[i].Update(
+			&m_player,
+			deltaTime,
+			m_collisionBoxes,
+			m_collisionCount
+		);
+
+		//살아있는 몬스터만 총알 피격 처리
+		if (!m_mobs[i].IsDead())
+		{
+			int hitCount =
+				m_player.CheckBulletHit(
+					m_mobs[i].GetX(),
+					m_mobs[i].GetY(),
+					m_mobs[i].GetCollisionWidth(),
+					m_mobs[i].GetCollisionHeight()
+				);
+
+			//총알 한 발당 25 데미지
+			if (hitCount > 0)
+			{
+				m_mobs[i].Damage(
+					hitCount * 25
+				);
+			}
+		}
+	}
+
+	//마린 체력이 0이면 게임오버
+	if (m_player.GetHP() <= 0)
+	{
+		ScenePlayResult::SetResult(
+			false
+		);
+
+		g_pApp->ChangeScene(
+			GAME_PHASE::SCENE_PLAYRESULT
+		);
+
+		return 0;
+	}
+
+	//Stage 1과 2는 오른쪽 출구로 다음 스테이지 이동
+	if (m_currentStage < 3)
+	{
+		float exitCenterY =
+			m_mapHeight * 0.5f;
+
+		if (
+			m_player.GetX()
+	> m_mapWidth - 130.0f &&
+			m_player.GetY()
+				> exitCenterY - 90.0f &&
+			m_player.GetY()
+			< exitCenterY + 90.0f
+			)
+		{
+			LoadStage(
+				m_currentStage + 1
+			);
+
+			return 0;
+		}
+	}
+
+	//Stage 3 보스 처치 확인
+	if (
+		m_currentStage == 3 &&
+		m_mobCount > 0
+		)
+	{
+		bool bossDead =
+			m_mobs[0].IsDead();
+
+		//울트라를 죽이면 게임 클리어
+		if (bossDead)
+		{
+			ScenePlayResult::SetResult(
+				true
+			);
+
+			g_pApp->ChangeScene(
+				GAME_PHASE::SCENE_PLAYRESULT
+			);
+
+			return 0;
+		}
+	}
+
+	return 0;
+}
+
+//카메라 이동
+void ScenePlay::UpdateCamera()
+{
 	float screenWidth =
 		(float)g2_GetScnW();
 
 	float screenHeight =
 		(float)g2_GetScnH();
 
-
-	// 확대된 상태에서 실제로 보이는 월드 영역
 	float cameraViewWidth =
 		screenWidth / m_cameraZoom;
 
 	float cameraViewHeight =
 		screenHeight / m_cameraZoom;
 
-
-	// 플레이어를 화면 중앙에 두도록 카메라 위치 계산
+	//마린을 중심으로 카메라 이동
 	m_cameraX =
-		m_playerX - cameraViewWidth / 2.0f;
+		m_player.GetX()
+		- cameraViewWidth * 0.5f;
 
 	m_cameraY =
-		m_playerY - cameraViewHeight / 2.0f;
+		m_player.GetY()
+		- cameraViewHeight * 0.5f;
 
-
-	// 카메라가 움직일 수 있는 최대 좌표
 	float maxCameraX =
-		m_mapWidth - cameraViewWidth;
+		m_mapWidth
+		- cameraViewWidth;
 
 	float maxCameraY =
-		m_mapHeight - cameraViewHeight;
+		m_mapHeight
+		- cameraViewHeight;
 
-
-	// 혹시 맵이 화면보다 작은 경우
 	if (maxCameraX < 0.0f)
+	{
 		maxCameraX = 0.0f;
+	}
 
 	if (maxCameraY < 0.0f)
+	{
 		maxCameraY = 0.0f;
+	}
 
-
-	// 왼쪽 / 위 제한
 	if (m_cameraX < 0.0f)
+	{
 		m_cameraX = 0.0f;
+	}
 
 	if (m_cameraY < 0.0f)
+	{
 		m_cameraY = 0.0f;
+	}
 
-
-	// 오른쪽 / 아래 제한
 	if (m_cameraX > maxCameraX)
+	{
 		m_cameraX = maxCameraX;
+	}
 
 	if (m_cameraY > maxCameraY)
+	{
 		m_cameraY = maxCameraY;
-
-	UpdateMarineDirection();
-	// =========================
-	// 좌클릭 사격
-	// =========================
-
-	if (
-		GetGameInput()->GetMouseEvent(0)
-		== EInput::EINPUT_DOWN
-		)
-	{
-		ShootBullet();
 	}
-
-	// =========================
-	// 총알 이동
-	// =========================
-
-	for (int i = 0; i < (int)m_bullets.size(); i++)
-	{
-		m_bullets[i].x +=
-			m_bullets[i].dirX *
-			m_bullets[i].speed;
-
-		m_bullets[i].y +=
-			m_bullets[i].dirY *
-			m_bullets[i].speed;
-	}
-
-	// =========================
-// 총알 제거
-// =========================
-
-	for (int i = (int)m_bullets.size() - 1; i >= 0; i--)
-	{
-		bool removeBullet = false;
-
-
-		// 맵 밖
-		if (
-			m_bullets[i].x < 0 ||
-			m_bullets[i].y < 0 ||
-			m_bullets[i].x > m_mapWidth ||
-			m_bullets[i].y > m_mapHeight
-			)
-		{
-			removeBullet = true;
-		}
-
-
-		// 벽 또는 바위
-		if (
-			CheckBulletCollision(
-				m_bullets[i].x,
-				m_bullets[i].y
-			)
-			)
-		{
-			removeBullet = true;
-		}
-
-
-		if (removeBullet)
-		{
-			m_bullets.erase(
-				m_bullets.begin() + i
-			);
-		}
-	}
-
-
-	// =========================
-	// Stage 1 출구
-	// =========================
-
-	if (m_currentStage == 1)
-	{
-		// 오른쪽 출구에 도착
-		if (
-			m_playerX > m_mapWidth - 120.0f &&
-			m_playerY > 415.0f &&
-			m_playerY < 510.0f
-			)
-		{
-			LoadStage(2);
-
-			// 여기서 Update 종료
-			// 스테이지 변경 직후 이전 카메라 계산 방지
-			return 0;
-		}
-	}
-	// =========================
-	// 공격 애니메이션 종료
-	// =========================
-
-	if (m_isAttacking)
-	{
-		if (
-			GetTickCount64() - m_attackStartTime
-			> 160
-			)
-		{
-			m_isAttacking = false;
-		}
-	}
-
-	return 0;
-}
-int ScenePlay::Init()
-{
-	// =========================
-// Marine 이미지 로드
-// =========================
-
-	for (int i = 0; i < 16; i++)
-	{
-		m_txMarineMove[i] = -1;
-		m_txMarineAttack[i] = -1;
-	}
-
-	char filePath[256];
-
-
-	// 이동 이미지 16장
-	for (int i = 0; i < 16; i++)
-	{
-		sprintf_s(
-			filePath,
-			"resource/character/marine/move/move_%02d.png",
-			i + 1
-		);
-
-		m_txMarineMove[i] =
-			g2_TextureLoad(filePath);
-	}
-
-
-	// 공격 이미지 16장
-	for (int i = 0; i < 16; i++)
-	{
-		sprintf_s(
-			filePath,
-			"resource/character/marine/attack/attack_%02d.png",
-			i + 1
-		);
-
-		m_txMarineAttack[i] =
-			g2_TextureLoad(filePath);
-	}
-
-
-	// 총알 이미지
-	m_txBullet =
-		g2_TextureLoad(
-			"resource/character/marine/bullet/bullet_01.png"
-		);
-
-
-	// 초기 상태
-	m_facingDir = 0;
-	m_moveFrame = 0;
-
-	m_isMoving = false;
-	m_isAttacking = false;
-
-	m_lastMoveAnimTime = GetTickCount64();
-
-	m_bullets.clear();
-
-	// Stage 1 시작
-	LoadStage(1);
-
-	return 0;
 }
 
+//게임 화면 출력
 int ScenePlay::Render()
 {
-	// =========================
-	// Stage 1 맵 출력
-	// =========================
+	//맵 화면 위치
+	VEC2 mapPosition{
+		-m_cameraX * m_cameraZoom,
+		-m_cameraY * m_cameraZoom
+	};
 
+	//맵 확대
+	VEC2 mapScale{
+		m_cameraZoom,
+		m_cameraZoom
+	};
+
+	//맵 출력
+	g2_Draw2D(
+		m_txMap,
+		nullptr,
+		&mapPosition,
+		&mapScale
+	);
+
+	//몬스터 출력
+	for (int i = 0; i < m_mobCount; i++)
 	{
-		VEC2 mapPosition{
-	-m_cameraX * m_cameraZoom,
-	-m_cameraY * m_cameraZoom
-		};
-
-		VEC2 mapScale{
-			m_cameraZoom,
+		m_mobs[i].Render(
+			m_cameraX,
+			m_cameraY,
 			m_cameraZoom
-		};
-
-		g2_Draw2D(
-			m_txStage1,
-			nullptr,
-			&mapPosition,
-			&mapScale
 		);
 	}
 
-
-	// =========================
-	// 마린 출력
-	// =========================
-
+	//마린 출력
+	m_player.Render(
+		m_cameraX,
+		m_cameraY,
+		m_cameraZoom
+	);
+	//마린 HP UI 출력
 	{
-		// 실제 월드 위치 - 카메라 위치
-		// = 화면에서 보이는 위치
-		/*VEC2 marinePosition{
-			(m_playerX - m_cameraX) * m_cameraZoom,
-			(m_playerY - m_cameraY) * m_cameraZoom
-		};
+		int hp =
+			m_player.GetHP();
 
-		VEC2 marineScale{
-			0.14f * m_cameraZoom,
-			0.14f * m_cameraZoom
-		};*/
+		int maxHp =
+			m_player.GetMaxHP();
+
+		float hpRatio =
+			(float)hp / (float)maxHp;
+
+		//체력에 따라 글자 색 변경
+		unsigned long hpColor =
+			0xFF00FF00;
+
+		if (hpRatio <= 0.3f)
 		{
-			VEC2 marinePosition{
-				(m_playerX - m_cameraX)
-					* m_cameraZoom,
+			hpColor =
+				0xFFFF4444;
+		}
+		else if (hpRatio <= 0.6f)
+		{
+			hpColor =
+				0xFFFFFF00;
+		}
 
-				(m_playerY - m_cameraY)
-					* m_cameraZoom
-			};
+		//20칸짜리 체력바
+		const int barCount = 20;
 
+		int filledCount =
+			(int)(hpRatio * barCount);
 
-			VEC2 marineScale{
-				0.14f * m_cameraZoom,
-				0.14f * m_cameraZoom
-			};
+		char hpBar[64] = {};
 
+		int index = 0;
 
-			int textureIndex =
-				m_facingDir * 2;
+		hpBar[index++] = '[';
 
-			// =========================
-// 총알 출력
-// =========================
-
-			for (int i = 0; i < (int)m_bullets.size(); i++)
+		for (int i = 0; i < barCount; i++)
+		{
+			if (i < filledCount)
 			{
-				VEC2 bulletPosition{
-
-					(m_bullets[i].x - m_cameraX)
-						* m_cameraZoom,
-
-					(m_bullets[i].y - m_cameraY)
-						* m_cameraZoom
-				};
-
-
-				VEC2 bulletScale{
-					0.10f * m_cameraZoom,
-					0.10f * m_cameraZoom
-				};
-
-
-				g2_Draw2D(
-					m_txBullet,
-					nullptr,
-					&bulletPosition,
-					&bulletScale
-				);
+				hpBar[index++] = '#';
 			}
-
-			// 공격 중
-			if (m_isAttacking)
-			{
-				unsigned long long attackTime =
-					GetTickCount64() - m_attackStartTime;
-
-
-				int attackFrame = 0;
-
-				if (attackTime > 80)
-				{
-					attackFrame = 1;
-				}
-
-
-				textureIndex += attackFrame;
-
-
-				g2_Draw2D(
-					m_txMarineAttack[textureIndex],
-					nullptr,
-					&marinePosition,
-					&marineScale
-				);
-			}
-
-			// 평상시
 			else
 			{
-				textureIndex += m_moveFrame;
-
-
-				g2_Draw2D(
-					m_txMarineMove[textureIndex],
-					nullptr,
-					&marinePosition,
-					&marineScale
-				);
+				hpBar[index++] = '-';
 			}
 		}
+
+		hpBar[index++] = ']';
+		hpBar[index] = '\0';
+
+		char hpText[128];
+
+		sprintf_s(
+			hpText,
+			"HP %s %d / %d",
+			hpBar,
+			hp,
+			maxHp
+		);
+
+		//화면 왼쪽 아래에 고정 출력
+		g2_FontDrawText(
+			m_fontHp,
+			{ 20, g2_GetScnH() - 55 },
+			hpColor,
+			hpText
+		);
 	}
-
-
 	return 0;
 }
 
+//리소스 해제
 int ScenePlay::Destroy()
 {
-	// Stage 1 맵 해제
-	if (m_txStage1 != -1)
+	//몬스터 상태 정리
+	for (int i = 0; i < m_mobCount; i++)
 	{
-		g2_TextureRelease(m_txStage1);
-		m_txStage1 = -1;
+		m_mobs[i].Destroy();
 	}
 
+	m_mobCount = 0;
 
-	// 마린 이미지 해제
-	// Marine 이동/공격 이미지 해제
-	for (int i = 0; i < 16; i++)
+	//몬스터 공용 이미지와 사운드 해제
+	GameMob::ReleaseSharedResources();
+
+	//마린 해제
+	m_player.Destroy();
+
+	//맵 해제
+	if (m_txMap != -1)
 	{
-		if (m_txMarineMove[i] != -1)
-		{
-			g2_TextureRelease(
-				m_txMarineMove[i]
-			);
+		g2_TextureRelease(
+			m_txMap
+		);
 
-			m_txMarineMove[i] = -1;
-		}
-
-
-		if (m_txMarineAttack[i] != -1)
-		{
-			g2_TextureRelease(
-				m_txMarineAttack[i]
-			);
-
-			m_txMarineAttack[i] = -1;
-		}
+		m_txMap = -1;
 	}
-
-
-	// 총알
-	if (m_txBullet != -1)
-	{
-		g2_TextureRelease(m_txBullet);
-
-		m_txBullet = -1;
-	}
-
-
-	m_bullets.clear();
-
 
 	return 0;
-}
-
-bool ScenePlay::CheckCollision(float x, float y)
-{
-	for (int i = 0; i < m_collisionCount; i++)
-	{
-		CollisionBox& box = m_collisionBoxes[i];
-
-		// 마린과 벽/바위가 겹치는지 확인
-		if (
-			x < box.x + box.width &&
-			x + m_playerCollisionW > box.x &&
-			y < box.y + box.height &&
-			y + m_playerCollisionH > box.y
-			)
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
-
-void ScenePlay::LoadStage(int stage)
-{
-	m_currentStage = stage;
-
-	// 기존 맵 이미지가 있으면 해제
-	if (m_txStage1 != -1)
-	{
-		g2_TextureRelease(m_txStage1);
-		m_txStage1 = -1;
-	}
-
-
-	// =========================
-	// Stage 1
-	// =========================
-	if (stage == 1)
-	{
-		m_txStage1 =
-			g2_TextureLoad("resource/BG/BG_stage1.png");
-
-		m_playerX = 300.0f;
-		m_playerY = 500.0f;
-	}
-
-
-	// =========================
-	// Stage 2
-	// =========================
-	else if (stage == 2)
-	{
-		m_txStage1 =
-			g2_TextureLoad("resource/BG/BG_stage2.png");
-
-		// Stage 2 시작 위치
-		// 왼쪽에서 시작
-		m_playerX = 180.0f;
-		m_playerY = 470.0f;
-	}
-
-
-	// 새 맵의 실제 크기 읽기
-	m_mapWidth =
-		(float)g2_TextureWidth(m_txStage1);
-
-	m_mapHeight =
-		(float)g2_TextureHeight(m_txStage1);
-
-
-	// 카메라 초기화
-	m_cameraX = 0.0f;
-	m_cameraY = 0.0f;
-
-
-	// 일단 이전 스테이지 충돌박스 제거
-	// Stage 2 충돌은 다음 단계에서 따로 넣음
-	m_collisionCount = 0;
-
-
-	// =========================
-	// Stage 1 충돌박스
-	// =========================
-	if (stage == 1)
-	{
-		// 위쪽 벽
-		m_collisionBoxes[m_collisionCount++] =
-		{ 0.0f, 0.0f, m_mapWidth, 145.0f };
-
-		// 왼쪽 벽
-		m_collisionBoxes[m_collisionCount++] =
-		{ 0.0f, 0.0f, 110.0f, m_mapHeight };
-
-		// 아래쪽 벽
-		m_collisionBoxes[m_collisionCount++] =
-		{ 0.0f, 760.0f, m_mapWidth, 181.0f };
-
-		// 오른쪽 위 벽
-		m_collisionBoxes[m_collisionCount++] =
-		{ 1505.0f, 0.0f, 167.0f, 420.0f };
-
-		// 오른쪽 아래 벽
-		m_collisionBoxes[m_collisionCount++] =
-		{ 1505.0f, 500.0f, 167.0f, 441.0f };
-
-
-		// 배럭
-		m_collisionBoxes[m_collisionCount++] =
-		{ 205.0f, 110.0f, 300.0f, 270.0f };
-
-
-		// 바위들
-		m_collisionBoxes[m_collisionCount++] =
-		{ 435.0f, 430.0f, 105.0f, 60.0f };
-
-		m_collisionBoxes[m_collisionCount++] =
-		{ 1035.0f, 310.0f, 105.0f, 55.0f };
-
-		m_collisionBoxes[m_collisionCount++] =
-		{ 1195.0f, 565.0f, 125.0f, 50.0f };
-
-		m_collisionBoxes[m_collisionCount++] =
-		{ 465.0f, 690.0f, 85.0f, 45.0f };
-
-		m_collisionBoxes[m_collisionCount++] =
-		{ 275.0f, 605.0f, 50.0f, 30.0f };
-
-		m_collisionBoxes[m_collisionCount++] =
-		{ 1400.0f, 730.0f, 75.0f, 40.0f };
-	}
-}
-
-void ScenePlay::UpdateMarineDirection()
-{
-	// 마우스 화면 좌표
-	VEC3i mousePos =
-		GetGameInput()->MousePosition();
-
-
-	// 마린의 화면상 중심 위치
-	float playerScreenX =
-		(m_playerX - m_cameraX) * m_cameraZoom
-		+ (m_playerCollisionW * 0.5f * m_cameraZoom);
-
-	float playerScreenY =
-		(m_playerY - m_cameraY) * m_cameraZoom
-		+ (m_playerCollisionH * 0.5f * m_cameraZoom);
-
-
-	// 마린 → 마우스
-	float dx =
-		(float)mousePos.x - playerScreenX;
-
-	float dy =
-		(float)mousePos.y - playerScreenY;
-
-
-	// atan2 결과를 각도로 변경
-	float angle =
-		atan2f(dy, dx) * 180.0f / 3.14159265f;
-
-
-	// =========================
-	// 8방향 결정
-	// =========================
-
-	// 오른쪽
-	if (angle >= -22.5f && angle < 22.5f)
-	{
-		m_facingDir = 2;
-	}
-
-	// 오른쪽 아래
-	else if (angle >= 22.5f && angle < 67.5f)
-	{
-		m_facingDir = 1;
-	}
-
-	// 아래
-	else if (angle >= 67.5f && angle < 112.5f)
-	{
-		m_facingDir = 0;
-	}
-
-	// 왼쪽 아래
-	else if (angle >= 112.5f && angle < 157.5f)
-	{
-		m_facingDir = 7;
-	}
-
-	// 왼쪽
-	else if (angle >= 157.5f || angle < -157.5f)
-	{
-		m_facingDir = 6;
-	}
-
-	// 왼쪽 위
-	else if (angle >= -157.5f && angle < -112.5f)
-	{
-		m_facingDir = 5;
-	}
-
-	// 위
-	else if (angle >= -112.5f && angle < -67.5f)
-	{
-		m_facingDir = 4;
-	}
-
-	// 오른쪽 위
-	else
-	{
-		m_facingDir = 3;
-	}
-}
-
-void ScenePlay::ShootBullet()
-{
-	VEC3i mousePos =
-		GetGameInput()->MousePosition();
-
-
-	// 마린 화면상 중심
-	float playerScreenX =
-		(m_playerX - m_cameraX) * m_cameraZoom
-		+ (m_playerCollisionW * 0.5f * m_cameraZoom);
-
-	float playerScreenY =
-		(m_playerY - m_cameraY) * m_cameraZoom
-		+ (m_playerCollisionH * 0.5f * m_cameraZoom);
-
-
-	// 마우스 방향
-	float dx =
-		(float)mousePos.x - playerScreenX;
-
-	float dy =
-		(float)mousePos.y - playerScreenY;
-
-
-	float length =
-		sqrtf(dx * dx + dy * dy);
-
-
-	// 마우스가 마린과 거의 같은 위치에 있으면 발사 X
-	if (length < 1.0f)
-	{
-		return;
-	}
-
-
-	// 방향 벡터 정규화
-	dx /= length;
-	dy /= length;
-
-
-	Bullet bullet;
-
-	// 마린 중앙에서 총알 시작
-	bullet.x =
-		m_playerX + m_playerCollisionW * 0.5f;
-
-	bullet.y =
-		m_playerY + m_playerCollisionH * 0.5f;
-
-	bullet.dirX = dx;
-	bullet.dirY = dy;
-
-	bullet.speed = 12.0f;
-
-
-	m_bullets.push_back(bullet);
-
-
-	// 공격 애니메이션 시작
-	m_isAttacking = true;
-
-	m_attackStartTime =
-		GetTickCount64();
-}
-
-bool ScenePlay::CheckBulletCollision(
-	float x,
-	float y
-)
-{
-	for (
-		int i = 0;
-		i < m_collisionCount;
-		i++
-		)
-	{
-		CollisionBox& box =
-			m_collisionBoxes[i];
-
-
-		if (
-			x >= box.x &&
-			x <= box.x + box.width &&
-			y >= box.y &&
-			y <= box.y + box.height
-			)
-		{
-			return true;
-		}
-	}
-
-	return false;
 }
